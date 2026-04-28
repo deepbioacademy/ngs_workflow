@@ -1,0 +1,18 @@
+[workspace]
+authors = ["Jubayer Hossain <hossainmj@tutamail.com>"]
+channels = ["conda-forge", "bioconda"]
+name = "ngs_workflow"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+
+[dependencies]
+fastqc = ">=0.12.1,<0.13"
+multiqc = ">=1.34,<2"
+fastp = ">=1.3.3,<2"
+
+
+[tasks]
+qc = "fastqc data/raw/*.fastq.gz -o results/qc/ -t 4"
+multiqc = { cmd = "multiqc results/qc/ -o results/multiqc/", depends-on = ["qc"] }
+pipeline = { depends-on = ["qc", "multiqc"] }

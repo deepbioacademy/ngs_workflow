@@ -103,8 +103,13 @@ wget -P data/raw ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG0009
 ### 5.2 Quality Control & Trimming
 Evaluate the quality of your raw reads, trim adapters, and re-evaluate the trimmed reads.
 - **`fastqc`**: Analyzes sequence data and generates an HTML report detailing read quality. We run this *before* and *after* trimming to see the improvement.
+  - `-o`: Specifies the output directory to save the HTML and ZIP reports.
 - **`fastp`**: Automatically filters out low-quality reads and trims adapter sequences so they don't interfere with alignment.
+  - `-i` / `-I`: The input Forward (R1) and Reverse (R2) FASTQ files.
+  - `-o` / `-O`: The output (trimmed) Forward and Reverse FASTQ files.
+  - `--json` / `--html`: Saves the fastp quality reports in JSON and HTML formats so MultiQC can read them.
 - **`multiqc`**: Scans the `results/qc/` directory and aggregates all FastQC and fastp reports into a single, easy-to-read dashboard.
+  - `-o`: Specifies the output directory for the final MultiQC dashboard.
 
 ```bash
 # 1. Run FastQC on raw data (Before Trimming)
@@ -143,7 +148,9 @@ samtools faidx data/reference/ref.fa
 ### 5.4 Alignment
 Align the trimmed reads to the reference genome.
 - **`bwa mem`**: The algorithm that maps our short reads to the reference genome.
-- **`-R` flag**: Adds "Read Group" information (like sample name and sequencing platform). This is strictly required by GATK for downstream processing!
+  - `-t 4`: Uses 4 CPU threads to speed up the alignment process.
+  - `-R`: Adds "Read Group" information (e.g., `SM` for Sample Name, `PL` for Platform). This is strictly required by GATK for downstream processing!
+  - `>`: A bash redirect that saves the console output into a `.sam` file instead of printing it to the screen.
 ```bash
 bwa mem -t 4 -R "@RG\tID:SRR062634\tSM:HG00096\tPL:ILLUMINA" \
     data/reference/ref.fa \
@@ -153,8 +160,11 @@ bwa mem -t 4 -R "@RG\tID:SRR062634\tSM:HG00096\tPL:ILLUMINA" \
 
 ### 5.5 BAM Conversion & Sorting
 Convert SAM to BAM and sort it.
-- **`samtools view -Sb`**: Converts the plain-text SAM file into a compressed binary BAM file to save space.
+- **`samtools view`**: A tool to read and convert SAM/BAM files.
+  - `-S`: Tells samtools the input is a SAM file.
+  - `-b`: Tells samtools to output a BAM file.
 - **`samtools sort`**: Sorts the reads by their coordinate position on the genome (required for variant calling).
+  - `-o`: Specifies the output filename for the sorted BAM file.
 - **`samtools index`**: Creates a `.bai` index so tools can randomly access the BAM file quickly.
 ```bash
 samtools view -Sb results/alignment/SRR062634.sam | samtools sort -o results/alignment/SRR062634_sorted.bam
@@ -164,6 +174,9 @@ samtools index results/alignment/SRR062634_sorted.bam
 ### 5.6 Mark Duplicates (GATK / Picard)
 Mark PCR duplicates so they don't skew variant calling.
 - **`gatk MarkDuplicates`**: Identifies read pairs that likely originated from a single DNA molecule (PCR duplicates) and flags them so they are ignored by the variant caller. This prevents false positive variant calls caused by amplification biases.
+  - `-I`: The input sorted BAM file.
+  - `-O`: The output BAM file with duplicates marked.
+  - `-M`: A required text file where GATK will save metrics/statistics about the duplicates it found.
 ```bash
 gatk MarkDuplicates \
     -I results/alignment/SRR062634_sorted.bam \
@@ -176,6 +189,9 @@ samtools index results/alignment/SRR062634_marked_dup.bam
 ### 5.7 Variant Calling (HaplotypeCaller)
 Finally, call variants using GATK HaplotypeCaller.
 - **`gatk HaplotypeCaller`**: The core tool that actually identifies SNPs (Single Nucleotide Polymorphisms) and Indels (Insertions/Deletions) by assembling haplotypes in active regions. It outputs a VCF (Variant Call Format) file containing all identified mutations.
+  - `-R`: The reference genome FASTA file.
+  - `-I`: The input BAM file (after sorting and duplicate marking).
+  - `-O`: The output VCF file where the final variants will be saved.
 ```bash
 gatk HaplotypeCaller \
     -R data/reference/ref.fa \

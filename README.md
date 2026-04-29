@@ -17,6 +17,17 @@ The container is pre-configured with the standard variant calling stack:
 
 ---
 
+## 📂 Understanding the Project Files
+
+When you clone this repository, you will see a few core files. Here is what they do:
+
+- `README.md`: The file you are reading right now! It contains the documentation and instructions for the project.
+- `Dockerfile`: The "recipe" that Docker uses to build your isolated container. It tells Docker to start with Ubuntu, install `pixi`, and copy your project files inside. *(See the "For Students" section at the bottom for a line-by-line breakdown!)*
+- `pixi.toml`: The configuration file for the Pixi package manager. This is where we list all the bioinformatics tools we want to use (like `bwa`, `samtools`, `gatk4`) and their specific versions. 
+- `pixi.lock`: A generated file that locks down the *exact* versions of every single sub-dependency. This ensures that the environment builds exactly the same way every time, completely eliminating the "it works on my machine" problem.
+
+---
+
 ## 🚀 Step-by-Step Guide for Beginners
 
 Follow these steps to clone the repository, set up your environment, and run a complete Variant Calling pipeline.
@@ -82,7 +93,7 @@ Now that you are inside the container, let's run a complete analysis. We will us
 Before running the tools, we need to create the required output folders and download our sample data.
 ```bash
 # Create all necessary folders
-mkdir -p data/raw data/reference results/qc results/trimmed results/alignment results/variants
+mkdir -p data/raw data/reference results/qc results/trimmed results/alignment results/variants results/multiqc
 
 # Download sample data
 wget -P data/raw ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_1.filt.fastq.gz
@@ -90,19 +101,34 @@ wget -P data/raw ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG0009
 ```
 
 ### 5.2 Quality Control & Trimming
-Evaluate the quality of your raw reads and trim adapters.
+Evaluate the quality of your raw reads, trim adapters, and re-evaluate the trimmed reads.
+- **`fastqc`**: Analyzes sequence data and generates an HTML report detailing read quality. We run this *before* and *after* trimming to see the improvement.
+- **`fastp`**: Automatically filters out low-quality reads and trims adapter sequences so they don't interfere with alignment.
+- **`multiqc`**: Scans the `results/qc/` directory and aggregates all FastQC and fastp reports into a single, easy-to-read dashboard.
+
 ```bash
-# Run FastQC
+# 1. Run FastQC on raw data (Before Trimming)
 fastqc data/raw/SRR062634_1.filt.fastq.gz data/raw/SRR062634_2.filt.fastq.gz -o results/qc/
 
-# Trim reads with fastp
+# 2. Trim reads with fastp (and save reports to qc folder)
 fastp -i data/raw/SRR062634_1.filt.fastq.gz -I data/raw/SRR062634_2.filt.fastq.gz \
-      -o results/trimmed/SRR062634_1_trimmed.fastq.gz -O results/trimmed/SRR062634_2_trimmed.fastq.gz
+      -o results/trimmed/SRR062634_1_trimmed.fastq.gz -O results/trimmed/SRR062634_2_trimmed.fastq.gz \
+      --json results/qc/fastp.json --html results/qc/fastp.html
+
+# 3. Run FastQC on trimmed data (After Trimming)
+fastqc results/trimmed/SRR062634_1_trimmed.fastq.gz results/trimmed/SRR062634_2_trimmed.fastq.gz -o results/qc/
+
+# 4. Generate a combined report with MultiQC
+multiqc results/qc/ -o results/multiqc/
 ```
 
 ### 5.3 Reference Genome Indexing
 Before alignment, index your reference genome (only needs to be done once per reference).
 *(Make sure you have a reference genome `ref.fa` in `data/reference/` before running this)*.
+- **`bwa index`**: Creates an FM-index for the Burrows-Wheeler Aligner, enabling fast mapping.
+- **`gatk CreateSequenceDictionary`**: Creates a `.dict` file containing contig names and lengths, required by GATK.
+- **`samtools faidx`**: Creates a `.fai` index, allowing quick extraction of any sequence from the reference.
+
 ```bash
 # Index with BWA
 bwa index data/reference/ref.fa
@@ -116,6 +142,8 @@ samtools faidx data/reference/ref.fa
 
 ### 5.4 Alignment
 Align the trimmed reads to the reference genome.
+- **`bwa mem`**: The algorithm that maps our short reads to the reference genome.
+- **`-R` flag**: Adds "Read Group" information (like sample name and sequencing platform). This is strictly required by GATK for downstream processing!
 ```bash
 bwa mem -t 4 -R "@RG\tID:SRR062634\tSM:HG00096\tPL:ILLUMINA" \
     data/reference/ref.fa \
@@ -125,6 +153,9 @@ bwa mem -t 4 -R "@RG\tID:SRR062634\tSM:HG00096\tPL:ILLUMINA" \
 
 ### 5.5 BAM Conversion & Sorting
 Convert SAM to BAM and sort it.
+- **`samtools view -Sb`**: Converts the plain-text SAM file into a compressed binary BAM file to save space.
+- **`samtools sort`**: Sorts the reads by their coordinate position on the genome (required for variant calling).
+- **`samtools index`**: Creates a `.bai` index so tools can randomly access the BAM file quickly.
 ```bash
 samtools view -Sb results/alignment/SRR062634.sam | samtools sort -o results/alignment/SRR062634_sorted.bam
 samtools index results/alignment/SRR062634_sorted.bam
@@ -132,6 +163,7 @@ samtools index results/alignment/SRR062634_sorted.bam
 
 ### 5.6 Mark Duplicates (GATK / Picard)
 Mark PCR duplicates so they don't skew variant calling.
+- **`gatk MarkDuplicates`**: Identifies read pairs that likely originated from a single DNA molecule (PCR duplicates) and flags them so they are ignored by the variant caller. This prevents false positive variant calls caused by amplification biases.
 ```bash
 gatk MarkDuplicates \
     -I results/alignment/SRR062634_sorted.bam \
@@ -143,6 +175,7 @@ samtools index results/alignment/SRR062634_marked_dup.bam
 
 ### 5.7 Variant Calling (HaplotypeCaller)
 Finally, call variants using GATK HaplotypeCaller.
+- **`gatk HaplotypeCaller`**: The core tool that actually identifies SNPs (Single Nucleotide Polymorphisms) and Indels (Insertions/Deletions) by assembling haplotypes in active regions. It outputs a VCF (Variant Call Format) file containing all identified mutations.
 ```bash
 gatk HaplotypeCaller \
     -R data/reference/ref.fa \
@@ -161,3 +194,60 @@ If you prefer not to use Docker, you can install the tools directly on your syst
 3. Enter the environment: `pixi shell`
 
 All dependencies are defined in `pixi.toml`.
+
+---
+
+## 🎓 For Students: How We Created This Docker Container
+
+If you are learning how to build your own Docker containers, here is a step-by-step breakdown of how we created the `Dockerfile` for this project. 
+
+The `Dockerfile` is essentially a recipe. Docker reads this recipe from top to bottom to build the image.
+
+### 1. The Base Image
+```dockerfile
+FROM ubuntu:22.04
+```
+Every Dockerfile must start with a `FROM` instruction. This tells Docker what operating system to start with. We are using a clean, bare-bones Ubuntu Linux system.
+
+### 2. System Settings & Dependencies
+```dockerfile
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+```
+- `ENV`: Sets an environment variable. We set `DEBIAN_FRONTEND` to `noninteractive` so that Ubuntu doesn't ask us any "Yes/No" prompts while installing software (since no human is there to click "Yes" during the build process).
+- `RUN`: Executes a command inside the container. We use the `apt-get` package manager to update the system and install `curl` (a tool to download things from the internet).
+
+### 3. Installing Our Package Manager (Pixi)
+```dockerfile
+RUN curl -fsSL https://pixi.sh/install.sh | bash
+ENV PATH="/root/.pixi/bin:${PATH}"
+```
+We use `curl` to download and run the installation script for **Pixi**. Then, we update the system's `PATH` so that the computer knows where to find the `pixi` command.
+
+### 4. Setting Up the Workspace
+```dockerfile
+WORKDIR /workspace
+```
+`WORKDIR` creates a folder named `/workspace` inside the container and navigates into it (like running `mkdir /workspace` and then `cd /workspace`). Everything we do from now on happens inside this folder.
+
+### 5. Copying Files and Installing Bioinformatics Tools
+```dockerfile
+COPY pixi.toml pixi.lock* ./
+RUN pixi install
+COPY . .
+```
+- `COPY`: Takes files from your *actual* computer and copies them into the container. We first copy `pixi.toml` (which lists `bwa`, `gatk4`, etc.).
+- `RUN pixi install`: This tells Pixi to read the `.toml` file and download all the bioinformatics tools. 
+- `COPY . .`: Finally, we copy the rest of our project files (like scripts or READMEs) into the container. *(We do this in two steps to make rebuilding the image faster! If we only change a script, Docker doesn't have to re-download the heavy bioinformatics tools).*
+
+### 6. Defining How the Container Starts
+```dockerfile
+ENTRYPOINT ["pixi", "run"]
+CMD ["bash"]
+```
+- `ENTRYPOINT`: This is the main command that runs when the container starts. We set it to `pixi run`, meaning everything executed in this container will automatically use the Pixi environment where our tools are installed.
+- `CMD`: This provides the default argument to the Entrypoint. If the user just runs `docker run ngs-workflow`, it will execute `pixi run bash`, dropping them into an interactive terminal!

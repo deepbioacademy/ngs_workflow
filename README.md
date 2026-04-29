@@ -96,8 +96,10 @@ Before running the tools, we need to create the required output folders and down
 mkdir -p data/raw data/reference results/qc results/trimmed results/alignment results/variants results/multiqc
 
 # Download sample data
-curl -O data/raw ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_1.filt.fastq.gz
-curl -O data/raw ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_2.filt.fastq.gz
+cd data/raw
+
+curl -O ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_1.filt.fastq.gz
+curl -O ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_2.filt.fastq.gz
 ```
 
 ### 5.2 Quality Control & Trimming

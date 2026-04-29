@@ -136,6 +136,14 @@ Before alignment, index your reference genome (only needs to be done once per re
 - **`gatk CreateSequenceDictionary`**: Creates a `.dict` file containing contig names and lengths, required by GATK.
 - **`samtools faidx`**: Creates a `.fai` index, allowing quick extraction of any sequence from the reference.
 
+
+```bash 
+# Download refernece genome 
+cd data/reference/
+curl -O https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz
+gunzip hg38.fa.gz
+```
+
 ```bash
 # Index with BWA
 bwa index data/reference/ref.fa

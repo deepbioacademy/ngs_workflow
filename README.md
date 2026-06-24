@@ -52,7 +52,13 @@ pixi install
 
 Downloads all bioinformatics tools from `conda-forge` and `bioconda` using exact versions pinned in `pixi.lock`. Isolated to `.pixi/` — nothing is installed system-wide.
 
-### 4. Activate the Environment
+### 4. Make Scripts Executable (one time)
+
+```bash
+chmod +x scripts/*.sh
+```
+
+### 5. Activate the Environment
 
 ```bash
 pixi shell
@@ -79,7 +85,7 @@ REF="data/reference/hg38.fa"
 Set `SRA_ACCESSION` to any SRA run accession (e.g. `SRR062634`, `ERR1234567`), then:
 
 ```bash
-bash scripts/00_download_sra.sh
+bash scripts/00a_download_sra.sh
 ```
 
 This uses `prefetch` + `fasterq-dump` for fast parallel download, then compresses with `pigz`. Output is automatically named `data/raw/<SAMPLE_ID>_R1.fastq.gz` and `_R2.fastq.gz`.
@@ -88,39 +94,67 @@ This uses `prefetch` + `fasterq-dump` for fast parallel download, then compresse
 
 Place your files in `data/raw/` named `<SAMPLE_ID>_R1.fastq.gz` and `<SAMPLE_ID>_R2.fastq.gz`. Leave `SRA_ACCESSION` empty.
 
+**Option C — Subset for training / demo (small data):**
+
+Works with any paired-end FASTQ — not limited to this project's data.
+
+```bash
+# Minimal: outputs to data/subset/<SAMPLE_ID>_subset_demo_R1/R2.fastq.gz
+bash scripts/00b_subset_fastq.sh \
+  --in1 data/raw/SRR062634_1.filt.fastq.gz \
+  --in2 data/raw/SRR062634_2.filt.fastq.gz
+
+# Full control: custom output paths, read count, seed
+bash scripts/00b_subset_fastq.sh \
+  --in1 /path/to/any_R1.fastq.gz \
+  --in2 /path/to/any_R2.fastq.gz \
+  --out1 data/subset/demo_R1.fastq.gz \
+  --out2 data/subset/demo_R2.fastq.gz \
+  --reads 50000 \
+  --seed 42
+```
+
+`--reads` and `--seed` default to `N_READS` / `SUBSET_SEED` in `config.sh`. Same seed on both files keeps read pairs in sync. 50,000 reads run the full pipeline in seconds on a laptop.
+
 ### Run the Full Pipeline
 
 ```bash
+# using bash
 bash scripts/run_pipeline.sh
+
+# or directly (requires chmod +x from Setup step 4)
+./scripts/run_pipeline.sh
 ```
 
 ### Run a Single Step
 
 ```bash
 bash scripts/run_pipeline.sh --step 05   # runs only 05_align.sh
+./scripts/run_pipeline.sh --step 05      # equivalent
 ```
 
 ### Run Steps Individually
 
 ```bash
-bash scripts/00_download_sra.sh      # optional — download from SRA
-bash scripts/01_qc_raw.sh
-bash scripts/02_trim.sh
-bash scripts/03_qc_trimmed.sh
-bash scripts/04_index_reference.sh   # one-time reference setup
-bash scripts/05_align.sh
-bash scripts/06_sort_bam.sh
-bash scripts/07_mark_duplicates.sh
-bash scripts/08_variant_calling.sh
+./scripts/00a_download_sra.sh      # optional — download from SRA
+./scripts/00b_subset_fastq.sh      # optional — subset for training/demo
+./scripts/01_qc_raw.sh
+./scripts/02_trim.sh
+./scripts/03_qc_trimmed.sh
+./scripts/04_index_reference.sh    # one-time reference setup
+./scripts/05_align.sh
+./scripts/06_sort_bam.sh
+./scripts/07_mark_duplicates.sh
+./scripts/08_variant_calling.sh
 ```
 
-> **Note:** `04_index_reference.sh` and `00_download_sra.sh` are excluded from `run_pipeline.sh`. Reference indexing takes 60–90 minutes and is a one-time setup. Run both manually before the first pipeline run.
+> **Note:** `00a_download_sra.sh`, `00b_subset_fastq.sh`, and `04_index_reference.sh` are excluded from `run_pipeline.sh`. Reference indexing takes 60–90 minutes and is a one-time setup. Run these manually before the first pipeline run.
 
 ---
 
 ## Pipeline Steps — Biological Context
 
-### Step 00: Download from SRA (`00_download_sra.sh`)
+### Step 00a: Download from SRA (`00a_download_sra.sh`)
 
 **Why:** The NCBI Sequence Read Archive (SRA) is the world's largest repository of raw sequencing data — thousands of publicly available human and non-human datasets. Accessing public data lets you reproduce published studies, benchmark your pipeline, or practice on real data without generating it yourself.
 
@@ -128,6 +162,17 @@ bash scripts/08_variant_calling.sh
 
 **Input:** `SRA_ACCESSION` set in `config.sh` (any SRR/ERR/DRR accession)
 **Output:** `data/raw/<SAMPLE_ID>_R1.fastq.gz`, `data/raw/<SAMPLE_ID>_R2.fastq.gz`
+
+---
+
+### Step 00b: Subset FASTQ (`00b_subset_fastq.sh`) — training/demo only
+
+**Why:** Full WGS datasets are 10–50 GB — impractical for live demos or classroom sessions. Subsetting to 50,000–100,000 read pairs reduces runtime to seconds while preserving realistic QC metrics, trimming behaviour, and alignment output.
+
+`seqtk sample` uses a deterministic PRNG seeded by `SUBSET_SEED`. Running with the **same seed on R1 and R2** selects identical read indices, preserving pairing. A mismatched seed would break pair sync and cause alignment to fail.
+
+**Flags:** `--in1`, `--in2` (required), `--out1`, `--out2`, `--reads`, `--seed` (optional)
+**Output:** Specified via `--out1`/`--out2`; defaults to `READ1`/`READ2` from `config.sh`
 
 ---
 
@@ -218,7 +263,8 @@ ngs_workflow/
 ├── scripts/
 │   ├── config.sh                # ← Edit this for your sample
 │   ├── utils.sh                 # Shared logging helpers
-│   ├── 00_download_sra.sh       # Download from NCBI SRA (optional)
+│   ├── 00a_download_sra.sh      # Download from NCBI SRA (optional)
+│   ├── 00b_subset_fastq.sh      # Subset reads for training/demo (optional)
 │   ├── 01_qc_raw.sh
 │   ├── 02_trim.sh
 │   ├── 03_qc_trimmed.sh
@@ -227,9 +273,10 @@ ngs_workflow/
 │   ├── 06_sort_bam.sh
 │   ├── 07_mark_duplicates.sh
 │   ├── 08_variant_calling.sh
-│   └── run_pipeline.sh          # Master runner (steps 01–08)
+│   └── run_pipeline.sh          # Master runner (steps 01–03, 05–08)
 ├── data/
-│   ├── raw/                     # Place input FASTQ files here
+│   ├── raw/                     # Full FASTQ input files
+│   ├── subset/                  # Subsetted reads for training/demo
 │   └── reference/               # Reference genome + indices
 └── results/
     ├── qc/                      # FastQC + fastp reports
@@ -246,7 +293,7 @@ ngs_workflow/
 ```bash
 pixi run qc        # FastQC on data/raw/*.fastq.gz → results/qc/
 pixi run multiqc   # Aggregate QC reports (runs qc first)
-pixi run pipeline  # Full QC pipeline
+pixi run qc-pipeline  # Full QC pipeline (FastQC + MultiQC only)
 ```
 
 ---

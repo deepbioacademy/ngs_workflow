@@ -17,9 +17,10 @@ picard = ">=3.1.1,<4"
 gatk4 = ">=4.5.0,<5"
 sra-tools = ">=3.1,<4"
 pigz = ">=2.8,<3"
+seqtk = ">=1.5,<2"
 
 
 [tasks]
 qc = "fastqc data/raw/*.fastq.gz -o results/qc/ -t 4"
 multiqc = { cmd = "multiqc results/qc/ -o results/multiqc/", depends-on = ["qc"] }
-pipeline = { depends-on = ["qc", "multiqc"] }
+qc-pipeline = { depends-on = ["qc", "multiqc"] }

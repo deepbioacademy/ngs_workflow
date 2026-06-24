@@ -21,11 +21,13 @@ step_start "Variant calling — HaplotypeCaller (${SAMPLE_ID})"
 require_cmd gatk
 require_file "${REF}"
 require_file "${REF}.fai"
+require_file "${REF%.fa}.dict"
 
 MARKDUP_BAM="${DIR_ALIGN}/${SAMPLE_ID}_markdup.bam"
 OUT_VCF="${DIR_VARIANTS}/${SAMPLE_ID}_raw_variants.vcf"
 
 require_file "${MARKDUP_BAM}"
+require_file "${MARKDUP_BAM}.bai"
 
 mkdir -p "${DIR_VARIANTS}"
 

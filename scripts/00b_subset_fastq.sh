@@ -7,7 +7,7 @@
 #                                    [--reads 50000]
 #
 # --in1 / --in2    Source FASTQ files (required; gzip or uncompressed)
-# --out1 / --out2  Output paths (default: data/subset/<SAMPLE_ID>_subset_demo_R1/R2.fastq.gz)
+# --out1 / --out2  Output paths (default: data/subset/<derived-from-in1>_subset_demo_R1/R2.fastq.gz)
 # --reads          Read pairs to keep (default: N_READS from config.sh)
 #
 # Uses fastp --reads_to_process — takes the first N read pairs, no filtering applied.
@@ -21,8 +21,8 @@ require_cmd fastp
 # Defaults from config.sh
 IN1="${SRC_READ1}"
 IN2="${SRC_READ2}"
-OUT1="data/subset/${SAMPLE_ID}_subset_demo_R1.fastq.gz"
-OUT2="data/subset/${SAMPLE_ID}_subset_demo_R2.fastq.gz"
+OUT1="data/subset/__derived__"
+OUT2="data/subset/__derived__"
 READS="${N_READS}"
 
 # Parse flags
@@ -42,6 +42,13 @@ done
 
 require_file "${IN1}"
 require_file "${IN2}"
+
+# Derive base name from IN1: strip extensions and _1/_R1 suffixes
+BASE=$(basename "${IN1}" | sed 's/\.\(fastq\|fq\)\.gz$//' | sed 's/\.\(fastq\|fq\)$//' | sed 's/_[R]*[12][._].*//' | sed 's/_[R]*[12]$//')
+
+# Use derived base for default output if --out1/--out2 not explicitly set
+[[ "${OUT1}" == "data/subset/__derived__" ]] && OUT1="data/subset/${BASE}_subset_demo_R1.fastq.gz"
+[[ "${OUT2}" == "data/subset/__derived__" ]] && OUT2="data/subset/${BASE}_subset_demo_R2.fastq.gz"
 
 step_start "Subset FASTQ — ${READS} read pairs"
 log "R1: ${IN1} → ${OUT1}"

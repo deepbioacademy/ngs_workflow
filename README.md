@@ -1,8 +1,8 @@
 # NGS Variant Calling Workflow
 
-End-to-end containerized environment for Next-Generation Sequencing (NGS) data analysis, specifically **Variant Calling** using GATK best practices.
+End-to-end reproducible environment for Next-Generation Sequencing (NGS) data analysis — **Variant Calling** using GATK best practices.
 
-Uses **Docker** + [Pixi](https://pixi.sh/) for reproducibility — same environment on every machine, no installation conflicts.
+Uses [Pixi](https://pixi.sh/) for environment management — exact tool versions locked in `pixi.lock`, reproducible on any Linux machine without root or Docker.
 
 ## Tools Included
 
@@ -20,10 +20,16 @@ Uses **Docker** + [Pixi](https://pixi.sh/) for reproducibility — same environm
 
 ## Prerequisites
 
-Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/Mac) or [Docker Engine](https://docs.docker.com/engine/install/) (Linux). Verify:
+Install Pixi (one-time, no root needed):
 
 ```bash
-docker --version
+curl -fsSL https://pixi.sh/install.sh | bash
+```
+
+Restart your shell or source your profile, then verify:
+
+```bash
+pixi --version
 ```
 
 ---
@@ -37,38 +43,29 @@ git clone https://github.com/deepbioacademy/ngs_workflow.git
 cd ngs_workflow
 ```
 
-### 2. Build Image
+### 2. Install Tools
 
 ```bash
-docker build -t ngs-workflow .
+pixi install
 ```
 
-> Only needed once. Rebuilds are fast — Docker caches the dependency layer and only re-runs what changed.
+Installs all bioinformatics tools from `pixi.lock` — exact reproducible versions, isolated in `.pixi/`.
 
-### 3. Run Container
+### 3. Enter the Environment
 
 ```bash
-# Linux / Mac
-docker run -it \
-  -v $(pwd)/data:/workspace/data \
-  -v $(pwd)/results:/workspace/results \
-  ngs-workflow
-
-# Windows (PowerShell)
-docker run -it `
-  -v ${PWD}/data:/workspace/data `
-  -v ${PWD}/results:/workspace/results `
-  ngs-workflow
-
-# Windows (Command Prompt)
-docker run -it -v %cd%/data:/workspace/data -v %cd%/results:/workspace/results ngs-workflow
+pixi shell
 ```
 
-Your terminal prompt changes — you are now inside the container with all tools ready.
+All tools (`bwa`, `gatk4`, `samtools`, etc.) are now on your `$PATH`. Run any command directly.
+
+> Alternatively, prefix individual commands with `pixi run <command>` without entering the shell.
 
 ---
 
 ## Running the Variant Calling Pipeline
+
+All commands below assume you are inside `pixi shell` (or prefix each with `pixi run`).
 
 ### Step 1: Create Directories
 
@@ -86,7 +83,7 @@ cd data/raw
 curl -O ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_1.filt.fastq.gz
 curl -O ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_2.filt.fastq.gz
 
-cd /workspace
+cd ../..
 ```
 
 ### Step 3: Quality Control & Trimming
@@ -116,7 +113,7 @@ multiqc results/qc/ -o results/multiqc/
 cd data/reference/
 curl -O https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz
 gunzip hg38.fa.gz
-cd /workspace
+cd ../..
 
 # BWA index
 bwa index data/reference/hg38.fa
@@ -170,59 +167,22 @@ gatk HaplotypeCaller \
 
 ---
 
-## Alternative: Pixi Without Docker
+## Pixi Tasks
 
-If you have Pixi installed locally:
+Frequently used steps are wired up as Pixi tasks in `pixi.toml`:
 
 ```bash
-# Install Pixi
-curl -fsSL https://pixi.sh/install.sh | bash
-
-# Install all tools
-pixi install
-
-# Enter the environment
-pixi shell
+pixi run qc        # FastQC on raw reads
+pixi run multiqc   # Aggregate QC reports (runs qc first)
+pixi run pipeline  # Run full QC pipeline
 ```
-
-Then run any pipeline command directly.
 
 ---
 
-## For Students: How the Dockerfile Works
+## How It Works
 
-```dockerfile
-FROM ghcr.io/prefix-dev/pixi:latest
-```
-Starts from the **official Pixi image** — a minimal Debian-based Linux with Pixi pre-installed. No Ubuntu bloat, no manual apt-get steps. Pulls ~200 MB instead of building from scratch.
+`pixi.toml` declares all tool dependencies with version constraints. `pixi.lock` pins exact resolved versions. Running `pixi install` reads the lockfile and downloads pre-built conda packages from `conda-forge` and `bioconda` — no compiling, no root, no Docker.
 
-```dockerfile
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-```
-Safer shell: if any command in a pipe fails, the whole `RUN` step fails. Prevents silent errors.
+The `.pixi/` directory holds the isolated environment. It is excluded from git via `.gitignore`.
 
-```dockerfile
-WORKDIR /workspace
-COPY pixi.toml pixi.lock* ./
-```
-Creates `/workspace` and copies only the dependency files first. Docker caches this layer — if `pixi.toml` and `pixi.lock` haven't changed, the next step is skipped on rebuild.
-
-```dockerfile
-RUN pixi install --frozen
-```
-Installs all bioinformatics tools (`bwa`, `gatk4`, `samtools`, etc.) using exact versions from `pixi.lock`. `--frozen` means: never re-resolve dependencies, always use the lockfile — guarantees reproducibility.
-
-```dockerfile
-COPY . .
-```
-Copies remaining project files (scripts, etc.). Done after `pixi install` so that editing a script doesn't trigger a full tool reinstall.
-
-```dockerfile
-ENTRYPOINT ["pixi", "run"]
-CMD ["bash"]
-```
-Every command runs inside the Pixi environment. Default: `pixi run bash` drops you into an interactive shell with all tools on `$PATH`.
-
-### Why `.dockerignore` Matters
-
-Without `.dockerignore`, Docker sends your entire project folder to the build daemon — including `data/` (raw FASTQ files) and `.pixi/` (local environment cache), which can exceed **6 GB**. The `.dockerignore` file excludes these, cutting build context to kilobytes and making `docker build` nearly instant.
+To update tools, edit version constraints in `pixi.toml` and run `pixi update`, which regenerates `pixi.lock`.

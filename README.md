@@ -1,6 +1,6 @@
 # NGS Variant Calling Workflow
 
-End-to-end reproducible pipeline for Next-Generation Sequencing (NGS) **Variant Calling** using GATK best practices.
+End-to-end reproducible pipeline for Next-Generation Sequencing (NGS) **Variant Calling** using GATK best practices. Works with any paired-end Illumina FASTQ data.
 
 Uses [Pixi](https://pixi.sh/) for environment management — all tool versions locked in `pixi.lock`, reproducible on any Linux machine without root or Docker.
 
@@ -8,6 +8,7 @@ Uses [Pixi](https://pixi.sh/) for environment management — all tool versions l
 
 | Category | Tool |
 |---|---|
+| Data Download | `sra-tools`, `pigz` |
 | Quality Control | `fastqc`, `multiqc` |
 | Read Trimming | `fastp` |
 | Alignment | `bwa` |
@@ -22,7 +23,7 @@ Uses [Pixi](https://pixi.sh/) for environment management — all tool versions l
 
 ### 1. Install Pixi
 
-Pixi manages all bioinformatics tools. Install it once — no root required.
+Pixi manages all bioinformatics tools. Install once — no root required.
 
 ```bash
 curl -fsSL https://pixi.sh/install.sh | bash
@@ -41,7 +42,7 @@ git clone https://github.com/deepbioacademy/ngs_workflow.git
 cd ngs_workflow
 ```
 
-The repository includes a pre-built directory structure under `data/` and `results/` — no need to create folders manually.
+The repository includes a pre-built directory structure (`data/`, `results/`) — no manual folder creation needed.
 
 ### 3. Install All Tools
 
@@ -49,7 +50,7 @@ The repository includes a pre-built directory structure under `data/` and `resul
 pixi install
 ```
 
-Downloads all bioinformatics tools from `conda-forge` and `bioconda` using exact versions pinned in `pixi.lock`. Tools are isolated in `.pixi/` — nothing is installed system-wide.
+Downloads all bioinformatics tools from `conda-forge` and `bioconda` using exact versions pinned in `pixi.lock`. Isolated to `.pixi/` — nothing is installed system-wide.
 
 ### 4. Activate the Environment
 
@@ -57,207 +58,154 @@ Downloads all bioinformatics tools from `conda-forge` and `bioconda` using exact
 pixi shell
 ```
 
-All tools (`bwa`, `gatk4`, `samtools`, `fastqc`, etc.) are now on your `$PATH`. Every command in this guide runs inside this shell.
-
-> To run a single command without entering the shell: `pixi run <command>`
+All tools are now on your `$PATH`. All pipeline commands below run inside this shell.
 
 ---
 
-## Variant Calling Pipeline
+## Running the Pipeline
 
-### Step 1: Download Sample Data
+### Configure Your Sample
 
-**Why:** We need raw sequencing reads (FASTQ format) as input. FASTQ files store each read as four lines: a header, the nucleotide sequence, a separator, and Phred quality scores per base.
-
-**Sample:** HG00096 — a human male from the 1000 Genomes Project (British ancestry). Paired-end Illumina reads, chromosome 20 region.
+Open `scripts/config.sh` and set your sample details:
 
 ```bash
-cd data/raw
-
-curl -O ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_1.filt.fastq.gz
-curl -O ftp://ftp-trace.ncbi.nih.gov/1000genomes/ftp/phase3/data/HG00096/sequence_read/SRR062634_2.filt.fastq.gz
-
-cd ../..
+SAMPLE_ID="my_sample"     # Unique name for this sample
+SRA_ACCESSION=""          # SRA run accession e.g. SRR062634 (leave empty if using local files)
+REF="data/reference/hg38.fa"
 ```
 
-**Expected output:** Two gzipped FASTQ files — `SRR062634_1.filt.fastq.gz` (forward reads) and `SRR062634_2.filt.fastq.gz` (reverse reads). Each file contains millions of 100 bp reads.
+**Option A — Download from SRA (public data):**
+
+Set `SRA_ACCESSION` to any SRA run accession (e.g. `SRR062634`, `ERR1234567`), then:
+
+```bash
+bash scripts/00_download_sra.sh
+```
+
+This uses `prefetch` + `fasterq-dump` for fast parallel download, then compresses with `pigz`. Output is automatically named `data/raw/<SAMPLE_ID>_R1.fastq.gz` and `_R2.fastq.gz`.
+
+**Option B — Use local FASTQ files:**
+
+Place your files in `data/raw/` named `<SAMPLE_ID>_R1.fastq.gz` and `<SAMPLE_ID>_R2.fastq.gz`. Leave `SRA_ACCESSION` empty.
+
+### Run the Full Pipeline
+
+```bash
+bash scripts/run_pipeline.sh
+```
+
+### Run a Single Step
+
+```bash
+bash scripts/run_pipeline.sh --step 05   # runs only 05_align.sh
+```
+
+### Run Steps Individually
+
+```bash
+bash scripts/00_download_sra.sh      # optional — download from SRA
+bash scripts/01_qc_raw.sh
+bash scripts/02_trim.sh
+bash scripts/03_qc_trimmed.sh
+bash scripts/04_index_reference.sh   # one-time reference setup
+bash scripts/05_align.sh
+bash scripts/06_sort_bam.sh
+bash scripts/07_mark_duplicates.sh
+bash scripts/08_variant_calling.sh
+```
+
+> **Note:** `04_index_reference.sh` and `00_download_sra.sh` are excluded from `run_pipeline.sh`. Reference indexing takes 60–90 minutes and is a one-time setup. Run both manually before the first pipeline run.
 
 ---
 
-### Step 2: Quality Control
+## Pipeline Steps — Biological Context
 
-**Why:** Sequencers are not perfect. Raw reads can contain adapter contamination (synthetic sequences that must never align to the genome), low-quality bases at read ends (Phred score < 20, i.e., > 1% error rate), and GC bias. FastQC generates a per-sample HTML report so you can detect these issues before they corrupt downstream results. MultiQC aggregates all FastQC reports into a single dashboard — essential when processing many samples.
+### Step 00: Download from SRA (`00_download_sra.sh`)
 
-```bash
-# Assess raw read quality
-fastqc data/raw/SRR062634_1.filt.fastq.gz data/raw/SRR062634_2.filt.fastq.gz -o results/qc/
+**Why:** The NCBI Sequence Read Archive (SRA) is the world's largest repository of raw sequencing data — thousands of publicly available human and non-human datasets. Accessing public data lets you reproduce published studies, benchmark your pipeline, or practice on real data without generating it yourself.
 
-# Aggregate QC reports
-multiqc results/qc/ -o results/multiqc/
-```
+`prefetch` downloads the compressed `.sra` file to a local cache — this step is resumable if interrupted. `fasterq-dump` then extracts reads in parallel threads (far faster than the legacy `fastq-dump`). `pigz` compresses the output using all available CPU cores, reducing storage to ~30% of the uncompressed size.
 
-**Expected output:**
-- `results/qc/SRR062634_1.filt_fastqc.html` — interactive QC report per file
-- `results/multiqc/multiqc_report.html` — combined dashboard
-
-Key metrics to check: per-base quality scores, adapter content, sequence duplication levels, GC distribution.
+**Input:** `SRA_ACCESSION` set in `config.sh` (any SRR/ERR/DRR accession)
+**Output:** `data/raw/<SAMPLE_ID>_R1.fastq.gz`, `data/raw/<SAMPLE_ID>_R2.fastq.gz`
 
 ---
 
-### Step 3: Adapter Trimming
+### Step 01: QC on Raw Reads (`01_qc_raw.sh`)
 
-**Why:** Illumina sequencing uses adapter sequences to bind DNA fragments to the flow cell. When a fragment is shorter than the read length, the sequencer reads into the adapter — producing non-biological sequence that will fail to align. Fastp removes adapters, trims low-quality bases, and filters out reads that are too short to align reliably. This step directly improves alignment rate and variant calling accuracy.
+**Why:** Sequencers produce errors — low-quality bases at read ends, adapter contamination (synthetic sequences that must not align to the genome), and GC bias. FastQC generates a per-sample HTML report revealing these issues *before* trimming, giving you a baseline to compare against later.
 
-```bash
-fastp \
-  -i data/raw/SRR062634_1.filt.fastq.gz \
-  -I data/raw/SRR062634_2.filt.fastq.gz \
-  -o results/trimmed/SRR062634_1_trimmed.fastq.gz \
-  -O results/trimmed/SRR062634_2_trimmed.fastq.gz \
-  --json results/qc/fastp.json \
-  --html results/qc/fastp.html \
-  --thread 4
-```
-
-**Expected output:**
-- `results/trimmed/SRR062634_1_trimmed.fastq.gz` / `*_2_trimmed.fastq.gz` — cleaned reads
-- `results/qc/fastp.html` — trimming summary (reads passed/failed, adapter stats)
-
-Expect 95–99% reads to pass. A high failure rate signals low sequencing quality.
+**Output:** `results/qc/<sample>_R1_fastqc.html`, `_R2_fastqc.html`
+Key metrics: per-base quality, adapter content, GC distribution, duplication levels.
 
 ---
 
-### Step 4: Post-Trim QC
+### Step 02: Adapter Trimming (`02_trim.sh`)
 
-**Why:** Verify that trimming actually solved the problems identified in Step 2. Compare pre- and post-trim reports to confirm adapter contamination is gone and quality scores improved.
+**Why:** Illumina adapters bind DNA fragments to the flow cell. When a fragment is shorter than the read length, the sequencer reads into the adapter — producing non-biological sequence that fails alignment. Fastp removes adapters, trims low-quality bases (Phred < 20, i.e., >1% error probability), and drops reads shorter than 36 bp that would multi-map unreliably.
 
-```bash
-fastqc results/trimmed/SRR062634_1_trimmed.fastq.gz \
-        results/trimmed/SRR062634_2_trimmed.fastq.gz \
-        -o results/qc/
-
-multiqc results/qc/ -o results/multiqc/ --force
-```
-
-**Expected output:** Updated `multiqc_report.html` showing both raw and trimmed metrics side by side. Adapter content modules should now pass.
+**Output:** `results/trimmed/<sample>_R1_trimmed.fastq.gz`, `_R2_trimmed.fastq.gz`, `results/qc/<sample>_fastp.html`
+Expect 95–99% of reads to pass. High failure rate signals poor sequencing quality.
 
 ---
 
-### Step 5: Download & Index Reference Genome
+### Step 03: QC on Trimmed Reads (`03_qc_trimmed.sh`)
 
-**Why:** Alignment requires a reference genome — a curated consensus sequence representing a "standard" human genome. We use **hg38** (GRCh38), the current gold-standard assembly. Indexing pre-computes lookup structures (suffix arrays, hash tables) so BWA can locate a read's position in ~3 billion bases in milliseconds rather than scanning the entire genome. Three indices are needed: BWA's own index for alignment, a sequence dictionary for GATK's contig ordering checks, and a FASTA index for samtools random access.
+**Why:** Verify that trimming resolved the problems found in Step 01. FastQC is re-run on trimmed reads; MultiQC aggregates all reports (raw + trimmed + fastp) into a single dashboard — critical when processing multiple samples.
 
-> **Note:** hg38 is ~3 GB. Indexing takes 60–90 minutes. Do this once per machine.
-
-```bash
-cd data/reference/
-curl -O https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz
-gunzip hg38.fa.gz
-cd ../..
-
-# BWA index — enables read alignment
-bwa index data/reference/hg38.fa
-
-# GATK sequence dictionary — needed for variant calling
-gatk CreateSequenceDictionary -R data/reference/hg38.fa
-
-# samtools FASTA index — enables random region access
-samtools faidx data/reference/hg38.fa
-```
-
-**Expected output:**
-- `data/reference/hg38.fa` — uncompressed reference
-- `hg38.fa.amb`, `.ann`, `.bwt`, `.pac`, `.sa` — BWA index files
-- `hg38.dict` — sequence dictionary
-- `hg38.fa.fai` — FASTA index
+**Output:** Updated FastQC reports + `results/multiqc/multiqc_report.html`
+Adapter content and low-quality base warnings should now pass.
 
 ---
 
-### Step 6: Alignment
+### Step 04: Index Reference Genome (`04_index_reference.sh`)
 
-**Why:** We need to determine where each sequenced read originates in the genome before we can identify variants. BWA-MEM (Burrows-Wheeler Aligner, MEM algorithm) is the standard for Illumina paired-end data — it handles reads up to 1 Mbp, is tolerant of sequencing errors, and correctly maps reads spanning splice junctions or structural variants. The **Read Group** (`-R` flag) tags every read with sample identity, platform, and library — mandatory for multi-sample GATK workflows and for distinguishing PCR duplicates.
+**Why:** Three indices are required by three different tools:
+- **BWA index** (`.bwt`, `.sa`, etc.): suffix array enabling alignment of millions of reads in minutes instead of days
+- **GATK sequence dictionary** (`.dict`): contig name and length table for validating VCF headers
+- **samtools FASTA index** (`.fai`): byte-offset map enabling O(1) random access to any genomic region
 
-```bash
-bwa mem -t 4 \
-  -R "@RG\tID:SRR062634\tSM:HG00096\tPL:ILLUMINA\tLB:lib1\tPU:unit1" \
-  data/reference/hg38.fa \
-  results/trimmed/SRR062634_1_trimmed.fastq.gz \
-  results/trimmed/SRR062634_2_trimmed.fastq.gz \
-  > results/alignment/SRR062634.sam
-```
+hg38 is the current gold-standard human reference assembly (GRCh38). Run this step **once per machine**.
 
-**Expected output:** `results/alignment/SRR062634.sam` — SAM format file with one alignment record per read. Expect >95% overall alignment rate for a good-quality human sample. The SAM file can be several GB uncompressed.
+**Output:** Index files alongside the reference FASTA in `data/reference/`
 
 ---
 
-### Step 7: Convert, Sort & Index BAM
+### Step 05: Alignment (`05_align.sh`)
 
-**Why:** SAM (Sequence Alignment Map) is a plain-text format — large and slow to query. BAM is the binary-compressed equivalent (~5× smaller). Sorting by genomic coordinate is required because GATK and most downstream tools assume reads are ordered by position, not by the order they were sequenced. Indexing creates a `.bai` file that allows tools to jump directly to any genomic region without scanning the entire BAM.
+**Why:** To call variants we must know where in the 3-billion-base genome each read originates. BWA-MEM uses a seed-and-extend strategy: seeds short exact matches via the Burrows-Wheeler index, then extends alignments with a Smith-Waterman model. The **Read Group** (`@RG`) tag embeds sample identity into every read — required by GATK for multi-sample workflows and correct duplicate detection.
 
-```bash
-# Convert SAM → BAM and coordinate-sort in one pipe
-samtools view -Sb results/alignment/SRR062634.sam \
-  | samtools sort -o results/alignment/SRR062634_sorted.bam
-
-# Index the sorted BAM
-samtools index results/alignment/SRR062634_sorted.bam
-
-# Optional: remove the large SAM file to save disk space
-rm results/alignment/SRR062634.sam
-```
-
-**Expected output:**
-- `results/alignment/SRR062634_sorted.bam` — coordinate-sorted binary alignment
-- `results/alignment/SRR062634_sorted.bam.bai` — BAM index
+**Output:** `results/alignment/<sample>.sam`
+Expect >95% overall alignment rate for good-quality human WGS.
 
 ---
 
-### Step 8: Mark Duplicates
+### Step 06: Convert, Sort & Index BAM (`06_sort_bam.sh`)
 
-**Why:** PCR amplification is required during library preparation, but it creates identical copies of the same DNA molecule. If not marked, these duplicates are counted as independent evidence for a variant — artificially inflating variant allele frequencies and causing false positives. Picard's `MarkDuplicates` identifies read pairs with identical 5' mapping positions (the hallmark of PCR duplicates) and flags them with a SAM flag. GATK automatically ignores flagged duplicates during variant calling. This step does **not** remove reads — it only marks them.
+**Why:** SAM (Sequence Alignment Map) is plain text — large and slow to parse. BAM is the binary-compressed equivalent (~5× smaller). Coordinate sorting orders reads by chromosome and position, which downstream GATK tools require. The `.bai` index allows random region access without scanning the entire file. The SAM is deleted after conversion to recover disk space.
 
-```bash
-gatk MarkDuplicates \
-  -I results/alignment/SRR062634_sorted.bam \
-  -O results/alignment/SRR062634_marked_dup.bam \
-  -M results/alignment/marked_dup_metrics.txt
-
-samtools index results/alignment/SRR062634_marked_dup.bam
-```
-
-**Expected output:**
-- `results/alignment/SRR062634_marked_dup.bam` — BAM with duplicates flagged
-- `results/alignment/marked_dup_metrics.txt` — duplication rate report
-
-Check the metrics file: typical WGS duplication rates are 5–20%. Rates >40% suggest library complexity problems.
+**Output:** `results/alignment/<sample>_sorted.bam` + `.bai`
+`samtools flagstat` is printed — check mapped read percentage.
 
 ---
 
-### Step 9: Variant Calling
+### Step 07: Mark Duplicates (`07_mark_duplicates.sh`)
 
-**Why:** HaplotypeCaller is GATK's core variant caller. It identifies positions where the sample's sequence differs from the reference genome — these are candidate **variants** (SNPs and small indels). The algorithm locally reassembles reads into haplotypes around candidate variant sites using a De Bruijn graph, then evaluates the probability of each haplotype given the observed data using a hidden Markov model. This local reassembly makes it far more accurate than simple pileup-based callers, especially in repetitive regions and around indels.
+**Why:** PCR amplification during library preparation creates identical copies of the same DNA molecule. Without marking, every duplicate inflates variant allele frequencies, generating false positives. GATK MarkDuplicates identifies read pairs with identical 5′ mapping coordinates (the PCR duplicate hallmark) and sets the 0x400 SAM flag. HaplotypeCaller automatically ignores flagged reads. Reads are **marked, not removed**.
 
-```bash
-gatk HaplotypeCaller \
-  -R data/reference/hg38.fa \
-  -I results/alignment/SRR062634_marked_dup.bam \
-  -O results/variants/SRR062634_raw_variants.vcf \
-  --native-pair-hmm-threads 4
-```
-
-**Expected output:** `results/variants/SRR062634_raw_variants.vcf` — VCF (Variant Call Format) file listing all candidate SNPs and indels with position, reference allele, alternate allele, genotype, and quality scores. Raw output contains both true variants and false positives — further filtering (VQSR or hard filters) is applied in production pipelines.
+**Output:** `results/alignment/<sample>_markdup.bam` + duplication metrics file
+Typical WGS duplication rate: 5–20%. Above 40% signals low library complexity.
 
 ---
 
-## Pixi Tasks
+### Step 08: Variant Calling (`08_variant_calling.sh`)
 
-Frequently used QC steps are wired as Pixi tasks:
+**Why:** HaplotypeCaller identifies positions where this sample's genome differs from the reference — these are **variants** (SNPs and small indels). Unlike simple pileup callers, it locally reassembles reads into haplotypes using a De Bruijn graph around each candidate site, then scores haplotype likelihoods with a pair-HMM model. Local reassembly makes it significantly more accurate near indels and in repetitive regions.
 
-```bash
-pixi run qc        # FastQC on raw reads → results/qc/
-pixi run multiqc   # Aggregate QC reports (runs qc first)
-pixi run pipeline  # Run full QC pipeline
-```
+**Output:** `results/variants/<sample>_raw_variants.vcf`
+Raw VCF contains candidate variants plus false positives. Apply VQSR or hard filters before biological interpretation.
+
+> For multi-sample cohorts: use `-ERC GVCF` mode in this step, then run `GenomicsDBImport` + `GenotypeGVCFs` for joint genotyping.
 
 ---
 
@@ -265,25 +213,44 @@ pixi run pipeline  # Run full QC pipeline
 
 ```
 ngs_workflow/
-├── pixi.toml              # Tool dependencies and task definitions
-├── pixi.lock              # Exact locked versions (commit this file)
+├── pixi.toml                    # Tool dependencies + task definitions
+├── pixi.lock                    # Exact locked versions (always commit this)
+├── scripts/
+│   ├── config.sh                # ← Edit this for your sample
+│   ├── utils.sh                 # Shared logging helpers
+│   ├── 00_download_sra.sh       # Download from NCBI SRA (optional)
+│   ├── 01_qc_raw.sh
+│   ├── 02_trim.sh
+│   ├── 03_qc_trimmed.sh
+│   ├── 04_index_reference.sh    # One-time reference setup
+│   ├── 05_align.sh
+│   ├── 06_sort_bam.sh
+│   ├── 07_mark_duplicates.sh
+│   ├── 08_variant_calling.sh
+│   └── run_pipeline.sh          # Master runner (steps 01–08)
 ├── data/
-│   ├── raw/               # Input FASTQ files
-│   └── reference/         # Reference genome + indices
+│   ├── raw/                     # Place input FASTQ files here
+│   └── reference/               # Reference genome + indices
 └── results/
-    ├── qc/                # FastQC + fastp reports
-    ├── trimmed/           # Adapter-trimmed reads
-    ├── alignment/         # SAM/BAM files
-    ├── variants/          # VCF output
-    └── multiqc/           # Aggregated QC dashboard
+    ├── qc/                      # FastQC + fastp reports
+    ├── trimmed/                 # Adapter-trimmed reads
+    ├── alignment/               # SAM/BAM files
+    ├── variants/                # VCF output
+    └── multiqc/                 # Aggregated QC dashboard
 ```
 
-`data/` and `results/` directories are pre-created in this repo (via `.gitkeep` files) — no manual `mkdir` needed.
+---
+
+## Pixi Tasks (Quick QC)
+
+```bash
+pixi run qc        # FastQC on data/raw/*.fastq.gz → results/qc/
+pixi run multiqc   # Aggregate QC reports (runs qc first)
+pixi run pipeline  # Full QC pipeline
+```
 
 ---
 
 ## How Pixi Works
 
-`pixi.toml` declares all tool dependencies with version constraints. `pixi.lock` pins exact resolved versions. `pixi install` reads the lockfile and downloads pre-built conda packages from `conda-forge` and `bioconda` — no compiling, no root access required.
-
-The `.pixi/` directory holds the isolated environment and is excluded from git. To update tools, edit version constraints in `pixi.toml` and run `pixi update` to regenerate `pixi.lock`.
+`pixi.toml` declares tool dependencies with version constraints. `pixi.lock` pins exact resolved versions. `pixi install` downloads pre-built conda packages from `conda-forge` and `bioconda` — no compiling, no root access. The `.pixi/` environment directory is git-ignored. To update tools, edit constraints in `pixi.toml` and run `pixi update`.

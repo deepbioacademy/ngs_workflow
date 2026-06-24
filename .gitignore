@@ -1,5 +1,8 @@
-# Ignore data 
-data/
+# Ignore data files but keep directory structure
+data/**
+!data/**/.gitkeep
+results/**
+!results/**/.gitkeep
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

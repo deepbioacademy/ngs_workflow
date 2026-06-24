@@ -2,11 +2,11 @@
 # config.sh — Edit this file before running the pipeline.
 # All paths are relative to the project root (ngs_workflow/).
 
-SAMPLE_ID="my_sample"                        # Unique name, no spaces or slashes
+SAMPLE_ID="SRR062634"                        # Unique name, no spaces or slashes
 SRA_ACCESSION=""                             # SRA run accession e.g. SRR062634 (leave empty if using local files)
 
-READ1="data/raw/${SAMPLE_ID}_R1.fastq.gz"    # Forward / R1 reads
-READ2="data/raw/${SAMPLE_ID}_R2.fastq.gz"    # Reverse / R2 reads
+READ1="data/raw/${SAMPLE_ID}_1.filt.fastq.gz"    # Forward / R1 reads
+READ2="data/raw/${SAMPLE_ID}_2.filt.fastq.gz"    # Reverse / R2 reads
 
 REF="data/reference/hg38.fa"                 # Must be indexed (run 04_index_reference.sh first)
 

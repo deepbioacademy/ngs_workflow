@@ -98,23 +98,32 @@ Place your files in `data/raw/` named `<SAMPLE_ID>_R1.fastq.gz` and `<SAMPLE_ID>
 
 Works with any paired-end FASTQ — not limited to this project's data.
 
-```bash
-# Minimal: outputs to data/subset/<SAMPLE_ID>_subset_demo_R1/R2.fastq.gz
-bash scripts/00b_subset_fastq.sh \
-  --in1 data/raw/SRR062634_1.filt.fastq.gz \
-  --in2 data/raw/SRR062634_2.filt.fastq.gz
+Set source files and read count in `config.sh` (defaults already provided — update to your own files):
 
-# Full control: custom output paths, read count, seed
-bash scripts/00b_subset_fastq.sh \
+```bash
+SRC_READ1="data/raw/your_R1.fastq.gz"   # source to subset from
+SRC_READ2="data/raw/your_R2.fastq.gz"
+N_READS=50000                            # read pairs to keep
+```
+
+Then run with no arguments:
+
+```bash
+./scripts/00b_subset_fastq.sh
+```
+
+Or override any value via flags without touching `config.sh`:
+
+```bash
+./scripts/00b_subset_fastq.sh \
   --in1 /path/to/any_R1.fastq.gz \
   --in2 /path/to/any_R2.fastq.gz \
   --out1 data/subset/demo_R1.fastq.gz \
   --out2 data/subset/demo_R2.fastq.gz \
-  --reads 50000 \
-  --seed 42
+  --reads 10000
 ```
 
-`--reads` and `--seed` default to `N_READS` / `SUBSET_SEED` in `config.sh`. Same seed on both files keeps read pairs in sync. 50,000 reads run the full pipeline in seconds on a laptop.
+Takes first N read pairs using `fastp --reads_to_process` — no filtering applied. 50,000 reads run the full pipeline in seconds on a laptop.
 
 ### Run the Full Pipeline
 
@@ -169,10 +178,10 @@ bash scripts/run_pipeline.sh --step 05   # runs only 05_align.sh
 
 **Why:** Full WGS datasets are 10–50 GB — impractical for live demos or classroom sessions. Subsetting to 50,000–100,000 read pairs reduces runtime to seconds while preserving realistic QC metrics, trimming behaviour, and alignment output.
 
-`seqtk sample` uses a deterministic PRNG seeded by `SUBSET_SEED`. Running with the **same seed on R1 and R2** selects identical read indices, preserving pairing. A mismatched seed would break pair sync and cause alignment to fail.
+`fastp --reads_to_process` takes the first N read pairs with all filtering disabled — no quality trimming, no adapter removal, no length filtering. Pairs stay in sync automatically since both files are processed together.
 
-**Flags:** `--in1`, `--in2` (required), `--out1`, `--out2`, `--reads`, `--seed` (optional)
-**Output:** Specified via `--out1`/`--out2`; defaults to `READ1`/`READ2` from `config.sh`
+**Flags:** `--in1`, `--in2`, `--out1`, `--out2`, `--reads` — all optional, all default to `config.sh` values
+**Output:** `data/subset/<SAMPLE_ID>_subset_demo_R1.fastq.gz`, `_R2.fastq.gz`
 
 ---
 

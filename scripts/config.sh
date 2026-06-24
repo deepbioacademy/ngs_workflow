@@ -18,9 +18,10 @@ RG_LB="lib1"             # Library prep ID — used to detect inter-library dupl
 
 THREADS=4                # CPU threads (check available cores with: nproc)
 
-# Subsetting defaults — used by 00b_subset_fastq.sh (override with --reads / --seed flags)
-N_READS=50000            # Default read pairs to keep
-SUBSET_SEED=42           # Default random seed
+# Subsetting — used by 00b_subset_fastq.sh (all overridable via CLI flags)
+SRC_READ1="data/raw/SRR062634_1.filt.fastq.gz"   # Source R1 to subset from
+SRC_READ2="data/raw/SRR062634_2.filt.fastq.gz"   # Source R2 to subset from
+N_READS=50000            # Read pairs to keep
 
 # Output directories
 DIR_QC="results/qc"

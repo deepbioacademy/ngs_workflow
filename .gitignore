@@ -1,8 +1,19 @@
 # Ignore data files but keep directory structure
-data/**
-!data/**/.gitkeep
-results/**
-!results/**/.gitkeep
+# (git cannot negate files inside an ignored directory, so list each subdir explicitly)
+data/raw/*
+!data/raw/.gitkeep
+data/reference/*
+!data/reference/.gitkeep
+results/qc/*
+!results/qc/.gitkeep
+results/trimmed/*
+!results/trimmed/.gitkeep
+results/alignment/*
+!results/alignment/.gitkeep
+results/variants/*
+!results/variants/.gitkeep
+results/multiqc/*
+!results/multiqc/.gitkeep
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
